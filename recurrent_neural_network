@@ -1,0 +1,41 @@
+import generate_time_series
+
+import numpy as np
+import matplotlib.pyplot as plt
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense
+from tensorflow.keras.utils import plot_model
+
+#Curate data
+num_points = 1000
+series = generate_time_series.TimeSeries.sen_cos(num_points, 0.1, 0.1)
+X = series[:-1].reshape(-1, 1, 1)  # reshape para (amostras, time_steps, features)
+y = series[1:].reshape(-1, 1)  # pŕoximo valor na série temporal
+
+#Design architecture
+model = Sequential([
+    LSTM(50, input_shape=(1, 1)), Dense(1)
+])
+
+
+def custom_loss(y_true, y_pred):
+    return tf.reduce_mean(tf.square(y_true - y_pred))
+
+
+# Compile the model
+model.compile(optimizer="adam", loss=custom_loss)
+
+# Employ optimization
+model.fit(X, y, epochs=50, batch_size=68)
+
+#Predict New values
+num_predict = 1000
+predict_series = series[-num_predict:]
+last_sequence = predict_series.reshape(-1, 1, 1)
+predictions = model.predict(last_sequence).flatten()
+
+plt.plot(np.arange(0, num_points), predictions, label="predictions")
+plt.plot(np.arange(0, num_points), series, label="real", linestyle="--")
+plt.legend()
+plt.show()
