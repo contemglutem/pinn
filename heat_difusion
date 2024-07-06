@@ -1,0 +1,112 @@
+import numpy as np
+import tensorflow as tf
+import matplotlib.pyplot as plt
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Dense
+
+# Define the exact solution for comparison
+def exact_solution(x, t):
+    return np.exp(-np.pi ** 2 * t) * np.sin(np.pi * x)
+
+
+# Define the PINN model
+class PINN(Model):
+    def __init__(self, layers):
+        super(PINN, self).__init__()
+        self.hidden_layers = [Dense(units, activation='tanh') for units in layers]
+        self.output_layer = Dense(1)
+
+    def call(self, inputs):
+        u = tf.concat(inputs, axis=1)
+        for layer in self.hidden_layers:
+            u = layer(u)
+        u = self.output_layer(u)
+        return u
+
+
+# Define the physics-informed loss function
+def pinn_loss(model, x, t):
+    with tf.GradientTape(persistent=True) as tape:
+        tape.watch([x, t])
+        u = model([x, t])
+        u_x = tape.gradient(u, x)
+        u_t = tape.gradient(u, t)
+        u_xx = tape.gradient(u_x, x)
+    del tape
+
+    f = u_t - u_xx
+    mse_f = tf.reduce_mean(tf.square(f))
+    mse_u = tf.reduce_mean(tf.square(u - exact_solution(x.numpy(), t.numpy())))
+    return mse_f + mse_u
+
+
+# Generate training data
+N = 100
+x = np.linspace(0, 1, N).reshape(-1, 1)
+t = np.linspace(0, 1, N).reshape(-1, 1)
+x, t = np.meshgrid(x, t)
+x = x.flatten().reshape(-1, 1)
+t = t.flatten().reshape(-1, 1)
+x = tf.convert_to_tensor(x, dtype=tf.float32)
+t = tf.convert_to_tensor(t, dtype=tf.float32)
+
+# Initialize and compile the model
+layers = [75, 75, 75, 75]
+model = PINN(layers)
+optimizer = tf.keras.optimizers.Adam()
+
+# Training loop
+epochs = 2500
+for epoch in range(epochs):
+    with tf.GradientTape() as tape:
+        loss = pinn_loss(model, x, t)
+    gradients = tape.gradient(loss, model.trainable_variables)
+    optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+
+    if epoch % 100 == 0:
+        print(f'Epoch {epoch}, Loss: {loss.numpy()}')
+
+# Predict and plot the results
+x_test = np.linspace(0, 1, N).reshape(-1, 1)
+t_test = np.linspace(0, 1, N).reshape(-1, 1)
+x_test, t_test = np.meshgrid(x_test, t_test)
+x_test = x_test.flatten().reshape(-1, 1)
+t_test = t_test.flatten().reshape(-1, 1)
+x_test = tf.convert_to_tensor(x_test, dtype=tf.float32)
+t_test = tf.convert_to_tensor(t_test, dtype=tf.float32)
+u_pred = model([x_test, t_test])
+
+# Reshape for plotting
+x_test = x_test.numpy().reshape(N, N)
+t_test = t_test.numpy().reshape(N, N)
+u_pred = u_pred.numpy().reshape(N, N)
+
+# Exact solution
+u_exact = exact_solution(x_test, t_test)
+
+# Plot results
+plt.figure(figsize=(10, 5))
+plt.subplot(1, 2, 1)
+plt.contourf(x_test, t_test, u_exact, cmap='viridis')
+plt.colorbar(label=r'$\Theta(x, y)$')
+plt.title('Exact Solution')
+
+plt.subplot(1, 2, 2)
+plt.contourf(x_test, t_test, u_pred, cmap='viridis')
+plt.colorbar(label=r'$\Theta(x, y)$')
+plt.title('PINN Prediction')
+
+plt.show()
+
+# 3D plot function using matplotlib
+def plot3D(x, t, y):
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    x, t = np.meshgrid(x, t)
+    ax.plot_surface(x, t, y, cmap="rainbow")
+    ax.set_xlabel('x')
+    ax.set_ylabel('t')
+    ax.set_zlabel('u')
+    plt.show()
+
+plot3D(np.linspace(0, 1, N), np.linspace(0, 1, N), u_exact)
